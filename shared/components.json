@@ -1,0 +1,35 @@
+{
+  "components": [
+    {
+      "id": "led",
+      "name": "LED",
+      "kind": "output",
+      "needs": ["digital"],
+      "pwmPreferred": true
+    },
+    {
+      "id": "relay",
+      "name": "Relay",
+      "kind": "output",
+      "needs": ["digital"]
+    },
+    {
+      "id": "button",
+      "name": "Push button",
+      "kind": "input",
+      "needs": ["digital"]
+    },
+    {
+      "id": "dht22",
+      "name": "DHT22 temperature / humidity",
+      "kind": "input",
+      "needs": ["digital"]
+    },
+    {
+      "id": "analog",
+      "name": "Analog sensor",
+      "kind": "input",
+      "needs": ["analog"]
+    }
+  ]
+}

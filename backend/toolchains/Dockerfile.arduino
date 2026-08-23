@@ -1,0 +1,14 @@
+# Optional standalone compiler image. The default backend Dockerfile already
+# installs arduino-cli + the arduino:avr core. To register another MCU family,
+# add a `core install` line here (or in ../Dockerfile) and a board row in
+# ../../shared/boards.json with the matching FQBN.
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+ARG CLI_VERSION=1.2.0
+RUN curl -fsSL \
+      "https://github.com/arduino/arduino-cli/releases/download/v${CLI_VERSION}/arduino-cli_${CLI_VERSION}_Linux_64bit.tar.gz" \
+    | tar -xz -C /usr/local/bin arduino-cli
+ENV ARDUINO_DIRECTORIES_DATA=/opt/arduino
+RUN arduino-cli core update-index && arduino-cli core install arduino:avr

@@ -3,114 +3,167 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hardware Deploy IDE — Baseline Demonstrator</title>
+  <title>Hardware Deploy IDE</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- Monaco Editor -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
 </head>
 <body>
   <div class="app">
     <header>
-      <h1>Hardware Deploy IDE <span style="font-size:0.55em;opacity:0.7;font-weight:500">(baseline)</span></h1>
-      <p class="subtitle">Write sketch → Compile elsewhere → Flash via Web Serial → Serial Monitor</p>
+      <h1>Hardware Deploy IDE</h1>
+      <p class="subtitle">Configure pins → generate → compile → flash / SSH deploy → monitor</p>
     </header>
 
-    <div class="toolbar">
-      <div class="group">
-        <button id="btn-connect" class="primary">Connect Board</button>
-        <button id="btn-disconnect" disabled>Disconnect</button>
-        <span id="connection-status" class="status">Disconnected</span>
+    <nav class="slides-nav" aria-label="Flow">
+      <button type="button" id="nav-config" class="slide-tab active">1. Hardware configuration</button>
+      <button type="button" id="nav-dash" class="slide-tab">2. Monitoring</button>
+    </nav>
+
+    <section id="slide-config" class="slide">
+      <div class="toolbar">
+        <div class="group">
+          <label>Target
+            <select id="board-select"></select>
+          </label>
+          <span id="board-notes" class="hint-inline"></span>
+        </div>
+        <div class="group">
+          <label class="check">
+            <input type="checkbox" id="simulate-flash" />
+            Simulated flash / skip USB
+          </label>
+        </div>
       </div>
 
-      <div class="group">
-        <label class="file-label">
-          Load .hex
-          <input type="file" id="hex-file" accept=".hex,.HEX" />
-        </label>
-
-        <!-- Declarative uploader button (required by arduino-web-uploader) -->
-        <button
-          id="btn-flash"
-          arduino-uploader
-          board="uno"
-          hex-href=""
-          disabled
-        >
-          Flash to Board
-          <span class="upload-progress" id="flash-progress"></span>
-        </button>
-      </div>
-
-      <div class="group">
-        <label>Board:
-          <select id="board-select">
-            <option value="uno">Arduino Uno (Optiboot 115200)</option>
-            <option value="nano">Arduino Nano (new bootloader)</option>
-            <option value="nanoOldBootloader">Nano (old / Chinese clone 57600)</option>
-            <option value="proMini">Pro Mini</option>
-          </select>
-        </label>
-      </div>
-    </div>
-
-    <main class="workspace">
-      <section class="editor-pane">
-        <div class="pane-header">
-          <h2>Sketch (C / Arduino)</h2>
-          <div class="editor-actions">
-            <button id="btn-load-sample">Load Blink Sample</button>
-            <button id="btn-download-ino">Download .ino</button>
+      <div class="config-grid">
+        <div class="card">
+          <div class="pane-header">
+            <h2>Inputs</h2>
+            <button type="button" id="btn-add-input">Add input</button>
           </div>
+          <div id="inputs-list" class="pin-list"></div>
         </div>
-        <div id="editor"></div>
-        <p class="hint">
-          Compilation is not performed in the browser. Use the Arduino IDE (or arduino-cli) to compile
-          this sketch for <strong>Arduino Uno</strong> and export the <code>.hex</code> file
-          (Sketch → Export compiled Binary). Then load the .hex above and flash.
-        </p>
-      </section>
-
-      <section class="monitor-pane">
-        <div class="pane-header">
-          <h2>Serial Monitor</h2>
-          <div class="monitor-controls">
-            <label>Baud:
-              <select id="baud-select">
-                <option value="9600">9600</option>
-                <option value="19200">19200</option>
-                <option value="38400">38400</option>
-                <option value="57600">57600</option>
-                <option value="115200" selected>115200</option>
-              </select>
-            </label>
-            <button id="btn-clear-monitor">Clear</button>
-            <label><input type="checkbox" id="auto-scroll" checked /> Auto-scroll</label>
+        <div class="card">
+          <div class="pane-header">
+            <h2>Outputs</h2>
+            <button type="button" id="btn-add-output">Add output</button>
           </div>
+          <div id="outputs-list" class="pin-list"></div>
         </div>
-        <div id="serial-output" class="serial-output"></div>
-        <div class="serial-input-row">
-          <input type="text" id="serial-input" placeholder="Type and press Enter to send…" disabled />
-          <button id="btn-send" disabled>Send</button>
-          <label><input type="checkbox" id="send-newline" checked /> + NL</label>
+      </div>
+
+      <div class="card">
+        <label class="block-label">Behaviour intent (optional)
+          <input type="text" id="intent" placeholder="e.g. Blink LED when button is pressed" />
+        </label>
+      </div>
+
+      <div class="toolbar">
+        <div class="group">
+          <button type="button" id="btn-pipeline" class="primary">Generate &amp; compile</button>
+          <button
+            type="button"
+            id="btn-flash"
+            arduino-uploader
+            board="uno"
+            hex-href=""
+            disabled
+          >
+            Flash to board
+            <span class="upload-progress" id="flash-progress"></span>
+          </button>
+          <button type="button" id="btn-deploy-pi" disabled>Deploy to Pi (SSH)</button>
+          <button type="button" id="btn-download">Download artefact</button>
         </div>
-      </section>
-    </main>
+        <div class="group pi-fields" id="pi-fields" hidden>
+          <input type="text" id="pi-host" placeholder="Pi host" />
+          <input type="text" id="pi-user" placeholder="user" />
+          <input type="password" id="pi-password" placeholder="password (optional)" />
+        </div>
+        <div class="group">
+          <label class="file-label">
+            Load .hex fallback
+            <input type="file" id="hex-file" accept=".hex,.HEX" />
+          </label>
+        </div>
+      </div>
+
+      <div class="workspace config-workspace">
+        <section class="card editor-pane">
+          <div class="pane-header">
+            <h2>Generated source (advanced)</h2>
+            <button type="button" id="btn-load-sample">Blink sample</button>
+          </div>
+          <div id="editor"></div>
+        </section>
+        <section class="card log-pane">
+          <div class="pane-header">
+            <h2>Pipeline log</h2>
+            <button type="button" id="btn-clear-pipeline">Clear</button>
+          </div>
+          <pre id="pipeline-log" class="pipeline-log"></pre>
+        </section>
+      </div>
+    </section>
+
+    <section id="slide-dash" class="slide hidden">
+      <div class="toolbar">
+        <div class="group">
+          <button type="button" id="btn-connect" class="primary">Connect Board</button>
+          <button type="button" id="btn-disconnect" disabled>Disconnect</button>
+          <span id="connection-status" class="status">Disconnected</span>
+        </div>
+        <div class="group">
+          <button type="button" id="btn-back-config">← Back to configuration</button>
+        </div>
+      </div>
+
+      <div id="telemetry-chips" class="chips"></div>
+
+      <div class="workspace">
+        <section class="card monitor-pane">
+          <div class="pane-header">
+            <h2>Serial / live output</h2>
+            <div class="monitor-controls">
+              <label>Baud
+                <select id="baud-select">
+                  <option value="9600">9600</option>
+                  <option value="19200">19200</option>
+                  <option value="38400">38400</option>
+                  <option value="57600">57600</option>
+                  <option value="115200" selected>115200</option>
+                </select>
+              </label>
+              <button type="button" id="btn-clear-monitor">Clear</button>
+              <label class="check"><input type="checkbox" id="auto-scroll" checked /> Auto-scroll</label>
+            </div>
+          </div>
+          <div id="serial-output" class="serial-output"></div>
+          <div class="serial-input-row">
+            <input type="text" id="serial-input" placeholder="Type and press Enter to send…" disabled />
+            <button type="button" id="btn-send" disabled>Send</button>
+            <label class="check"><input type="checkbox" id="send-newline" checked /> + NL</label>
+          </div>
+        </section>
+        <section class="card log-pane">
+          <div class="pane-header"><h2>Last pipeline</h2></div>
+          <pre id="pipeline-log-copy" class="pipeline-log"></pre>
+        </section>
+      </div>
+    </section>
 
     <footer>
       <p>
-        Uses <a href="https://github.com/dbuezas/arduino-web-uploader" target="_blank">arduino-web-uploader</a>
-        (STK500v1) + Web Serial API. Works in Chrome / Edge / Opera on desktop.
-        Secure context (HTTPS or localhost) required.
+        Arduino flash uses
+        <a href="https://github.com/dbuezas/arduino-web-uploader" target="_blank" rel="noopener">arduino-web-uploader</a>
+        (STK500v1) + Web Serial. Chrome / Edge / Opera on desktop; HTTPS or localhost.
+        Raspberry Pi uses generated Python over SSH (or a downloaded artefact).
       </p>
     </footer>
   </div>
 
-  <!-- Load the uploader AFTER the button exists in the DOM so it can attach handlers -->
   <script src="lib/arduino-web-uploader.js"></script>
   <script>
-    // The library attaches click handlers only on DOMContentLoaded.
-    // When the script is at the bottom of <body>, that event may already have fired.
-    // Re-dispatch so the handlers are attached to our Flash button.
     if (document.readyState !== "loading") {
       document.dispatchEvent(new Event("DOMContentLoaded"));
     }

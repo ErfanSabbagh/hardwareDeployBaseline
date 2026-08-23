@@ -1,73 +1,143 @@
-# Hardware Deploy IDE — Baseline Demonstrator
+# Hardware Deploy IDE
 
-This repository is the **starting point** for a take-home exercise.  
-It is a minimal browser-based Arduino Uno IDE that can:
+Two-slide flow: **configure hardware → generate firmware → compile on the server → flash or SSH-deploy → monitor**.
 
-1. Edit a sketch (Monaco editor)
-2. Flash a pre-compiled Intel HEX file to an Arduino Uno-class board over **Web Serial** (STK500v1)
-3. Open a live serial monitor
-
-It does **not** compile code, does **not** support Raspberry Pi, and has no multi-slide configuration flow. Those are the improvements described in [`ASSIGNMENT.md`](./ASSIGNMENT.md).
+The original baseline (Monaco + load a `.hex` + Web Serial) is still here as a fallback. Compilation now happens in the backend with `arduino-cli`. Raspberry Pi targets get a Python/`gpiozero` service instead of a hex file.
 
 ---
 
-## Quick start
+## Quick start (Docker)
 
 ```bash
-cd frontend
-python3 -m http.server 8000
+docker compose up --build
 ```
 
 Open **http://localhost:8000** in Chrome, Edge, or Opera (desktop).
 
-### Flashing a sketch
+Happy path:
 
-1. Write or paste code in the editor (or load the Blink sample).
-2. In the **Arduino IDE** (or `arduino-cli`):
-   - Board: Arduino Uno
-   - Sketch → **Export compiled Binary**
-   - Use the `.hex` file **without** `_with_bootloader` in the name.
-3. In the web app: **Load .hex** → select board → **Flash to Board**.
-4. After “Done!”, click **Connect Board** to use the serial monitor.
+1. Leave **Arduino Uno**, LED on **D13**.
+2. **Generate & compile**.
+3. Plug in the board → **Flash to board** (Web Serial port picker).
+4. After “Done!”, open **Monitoring** → **Connect Board**.
 
-### Requirements
+Without a USB cable: check **Simulated flash / skip USB**, then Generate & compile → Flash (simulated) → Monitoring.
 
-| Item | Notes |
+### Raspberry Pi
+
+1. Select **Raspberry Pi**, add GPIO pins, **Generate & compile** (no AVR compile).
+2. **Download artefact** (`app.py`) and run it on the Pi, **or**
+3. Fill host/user (password optional) and **Deploy to Pi (SSH)**.
+
+SSH defaults can also come from the environment (never commit secrets):
+
+```bash
+export PI_SSH_HOST=192.168.1.42
+export PI_SSH_USER=pi
+# export PI_SSH_KEY=/path/to/id_ed25519
+docker compose up --build
+```
+
+On the Pi: `python3` and `gpiozero` (`sudo apt install python3-gpiozero`). The backend writes `~/hw-deploy/app.py` and starts it with `nohup`. Logs: `~/hw-deploy/hw-deploy.log`.
+
+---
+
+## Local run (no Docker image)
+
+Needs Python 3.11+ and, for real AVR hexes, [`arduino-cli`](https://arduino.github.io/arduino-cli/) with `arduino:avr`:
+
+```bash
+arduino-cli core update-index
+arduino-cli core install arduino:avr
+arduino-cli lib install "Adafruit Unified Sensor" "DHT sensor library"
+```
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cd ..
+uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+UI-only (placeholder hex, **not** flashable):
+
+```bash
+MOCK_COMPILE=1 uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+Tests (mocked compiler):
+
+```bash
+cd backend && MOCK_COMPILE=1 pytest -q
+```
+
+If you serve only `frontend/` with `python3 -m http.server 8080`, the UI calls `http://localhost:8000` for `/api/*`. Prefer one process on port 8000 (FastAPI serves the static files).
+
+---
+
+## What was verified
+
+| Target | Generate | Compile | Deploy |
+|--------|----------|---------|--------|
+| Arduino Uno | yes | `arduino-cli` in Docker / host | Web Serial STK500v1 (you must click the port picker) |
+| Nano (new / old bootloader) | yes | FQBN in registry | Same flasher, different `flashProfile` |
+| Pro Mini | yes | FQBN `arduino:avr:pro` | STK500v1 |
+| Mega 2560 | yes | FQBN `arduino:avr:mega` | **No** in-browser flash (STK500v2). Use simulated flash or avrdude |
+| Raspberry Pi | Python | n/a | SSH from backend, or download `app.py` |
+
+Update this table honestly after you plug in hardware.
+
+---
+
+## How to add a new target
+
+1. **Registry** — add a board object to [`shared/boards.json`](shared/boards.json): `id`, `family` (`arduino` | `raspberry-pi` or a new family), `pins` with `capabilities`, `deployKind`, `defaultBaud`.
+2. **Compile** — for AVR, set `fqbn` (cores already in [`backend/Dockerfile`](backend/Dockerfile)). For another architecture, `arduino-cli core install …` in that Dockerfile (or [`backend/toolchains/Dockerfile.arduino`](backend/toolchains/Dockerfile.arduino)) and keep the FQBN on the board.
+3. **Generate** — Arduino and Pi are in [`backend/app/generator.py`](backend/app/generator.py) (`generate(config)`). New families: add a branch (same return shape). An LLM can replace this function later.
+4. **Flash / deploy** — `flashProfile` must match a key in arduino-web-uploader (`uno`, `nano`, `nanoOldBootloader`, `proMini`). Other protocols: new `deployKind` + backend/UI strategy (Mega is `compile_only` on purpose).
+5. **UI** — `GET /api/boards` drives the dropdown; no hardcoded pin lists.
+
+Components live in [`shared/components.json`](shared/components.json). Pin-conflict and capability checks are in [`backend/app/validate.py`](backend/app/validate.py).
+
+---
+
+## Architecture
+
+```
+config → generate → compile → flash | ssh → monitor
+```
+
+| Seam | Module |
 |------|--------|
-| Browser | Chrome / Edge / Opera (desktop only) |
-| Context | `http://localhost` or HTTPS |
-| Hardware | Arduino Uno, Nano, or Pro Mini (STK500v1 bootloader) |
-| Hex file | Produced externally; must not include the bootloader |
+| Board / pin / component contracts | `shared/*.json` + `backend/app/registry.py` |
+| Code generation | `backend/app/generator.py` |
+| Compile | `backend/app/compiler.py` (`arduino-cli` or `MOCK_COMPILE=1`) |
+| Pi deploy | `backend/app/pi_deploy.py` (Paramiko) |
+| Arduino flash | browser Web Serial + vendored `frontend/lib/arduino-web-uploader.js` |
+| Monitor | Slide B serial + `KEY=value` chips |
+
+API: `GET /api/health`, `/api/boards`, `/api/components`; `POST /api/generate`, `/api/compile`, `/api/pipeline`, `/api/deploy/pi`.
 
 ---
 
-## Project layout
+## Assumptions and limits
 
-```
-hardware-deploy-baseline/
-├── frontend/
-│   ├── index.html                 # UI shell
-│   ├── style.css                  # Dark theme
-│   ├── app.js                     # Editor, serial monitor, hex wiring
-│   └── lib/
-│       └── arduino-web-uploader.js  # Vendored STK500v1 flasher
-├── ASSIGNMENT.md                  # Take-home brief for candidates
-└── README.md                      # This file
-```
+- Flash requires a **secure context** (localhost or HTTPS) and Chromium desktop.
+- Hex for STK500v1 must be **without** the bootloader (`arduino-cli --output-dir` default).
+- D0/D1 are omitted from the Uno pin list (hardware serial).
+- DHT22 sketches need the libraries baked into the Docker image.
+- Pi has **no analog GPIO** in this registry; analog sensors need an ADC board (not generated).
+- SSH uses Paramiko `AutoAddPolicy` (lab convenience). Prefer keys via `PI_SSH_KEY`. Host keys are not pinned.
+- Compile sandbox is a per-request temp dir + timeout, not a gVisor jail. Do not expose this to the public internet.
+- Flashing can overwrite firmware; there is no recovery UI.
+- WSL2 USB serial: attach the Arduino to Windows and use Chrome **on Windows** against `http://localhost:8000`, or use usbipd. The Linux VM often does not see the COM port.
 
----
-
-## Baseline limitations (intentional)
-
-- Compilation is **client-external** (Arduino IDE / CLI only).
-- Only STK500v1 Arduino-compatible boards are supported by the included flasher.
-- Single-page UI; no hardware-configuration wizard.
-- No backend, no authentication, no multi-user concerns.
-
-See **ASSIGNMENT.md** for the three directions we want candidates to evolve this baseline toward.
+No API keys are required.
 
 ---
 
 ## License
 
-MIT for the demonstrator code. The vendored `arduino-web-uploader` retains its original MIT license (© David Buezas).
+MIT for this project. Vendored uploader: MIT, © David Buezas (`frontend/lib/NOTICE.txt`).

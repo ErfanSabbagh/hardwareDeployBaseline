@@ -1,0 +1,19 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      FRONTEND_DIR: /app/frontend
+      # Set MOCK_COMPILE=1 to skip arduino-cli (UI demo only).
+      MOCK_COMPILE: ${MOCK_COMPILE:-0}
+      PI_SSH_HOST: ${PI_SSH_HOST:-}
+      PI_SSH_USER: ${PI_SSH_USER:-}
+      PI_SSH_KEY: ${PI_SSH_KEY:-}
+    volumes:
+      # Optional: mount a host SSH key read-only. Uncomment and set PI_SSH_KEY=/run/secrets/pi_key
+      # - ${PI_SSH_KEY_FILE:-/dev/null}:/run/secrets/pi_key:ro
+      - ./shared:/app/shared:ro
+      - ./frontend:/app/frontend:ro
