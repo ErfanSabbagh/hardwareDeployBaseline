@@ -19,15 +19,20 @@ Happy path:
 1. Leave **Arduino Uno**, LED on **D13**.
 2. **Generate & compile**.
 3. Plug in the board → **Flash to board** (Web Serial port picker).
-4. After “Done!”, open **Monitoring** → **Connect Board**.
+4. After flash, Monitoring opens and serial **auto-reconnects** if the browser already has port permission; otherwise click **Connect Board**.
 
-Without a USB cable: check **Simulated flash / skip USB**, then Generate & compile → Flash (simulated) → Monitoring.
+Without a USB cable: check **Simulated flash / skip USB (fake telemetry)** — Monitoring will show generated `KEY=value` lines (not a real board).
+
+### Arduino Mega 2560
+
+Same generate → compile path (FQBN `arduino:avr:mega`). **Flash to board** uses a separate **STK500v2** Web Serial programmer (`frontend/lib/stk500v2-mega.js`), not the Uno STK500v1 uploader.
 
 ### Raspberry Pi
 
 1. Select **Raspberry Pi**, add GPIO pins, **Generate & compile** (no AVR compile).
-2. **Download artefact** (`app.py`) and run it on the Pi, **or**
-3. Fill host/user (password optional) and **Deploy to Pi (SSH)**.
+2. Fill host/user (password optional) → **Deploy to Pi (SSH)**.
+3. Monitoring **tails** `~/hw-deploy/hw-deploy.log` over SSH once a second. Use **Tail Pi logs** to restart the tail.
+4. Or **Download artefact** (`app.py`) and run it on the Pi yourself.
 
 SSH defaults can also come from the environment (never commit secrets):
 
@@ -81,11 +86,11 @@ If you serve only `frontend/` with `python3 -m http.server 8080`, the UI calls `
 
 | Target | Generate | Compile | Deploy |
 |--------|----------|---------|--------|
-| Arduino Uno | yes | `arduino-cli` in Docker / host | Web Serial STK500v1 (you must click the port picker) |
-| Nano (new / old bootloader) | yes | FQBN in registry | Same flasher, different `flashProfile` |
+| Arduino Uno | yes | `arduino-cli` | Web Serial STK500v1 + auto-reconnect |
+| Nano (new / old bootloader) | yes | FQBN in registry | Same STK500v1 flasher |
 | Pro Mini | yes | FQBN `arduino:avr:pro` | STK500v1 |
-| Mega 2560 | yes | FQBN `arduino:avr:mega` | **No** in-browser flash (STK500v2). Use simulated flash or avrdude |
-| Raspberry Pi | Python | n/a | SSH from backend, or download `app.py` |
+| Mega 2560 | yes | FQBN `arduino:avr:mega` | Web Serial STK500v2 (`stk500v2-mega.js`) |
+| Raspberry Pi | Python | n/a | SSH deploy + log tail (`POST /api/pi/logs`) |
 
 Update this table honestly after you plug in hardware.
 
@@ -96,7 +101,7 @@ Update this table honestly after you plug in hardware.
 1. **Registry** — add a board object to [`shared/boards.json`](shared/boards.json): `id`, `family` (`arduino` | `raspberry-pi` or a new family), `pins` with `capabilities`, `deployKind`, `defaultBaud`.
 2. **Compile** — for AVR, set `fqbn` (cores already in [`backend/Dockerfile`](backend/Dockerfile)). For another architecture, `arduino-cli core install …` in that Dockerfile (or [`backend/toolchains/Dockerfile.arduino`](backend/toolchains/Dockerfile.arduino)) and keep the FQBN on the board.
 3. **Generate** — Arduino and Pi are in [`backend/app/generator.py`](backend/app/generator.py) (`generate(config)`). New families: add a branch (same return shape). An LLM can replace this function later.
-4. **Flash / deploy** — `flashProfile` must match a key in arduino-web-uploader (`uno`, `nano`, `nanoOldBootloader`, `proMini`). Other protocols: new `deployKind` + backend/UI strategy (Mega is `compile_only` on purpose).
+4. **Flash / deploy** — `flashProtocol` `stk500v1` uses arduino-web-uploader `flashProfile` keys (`uno`, `nano`, …). `stk500v2` uses `frontend/lib/stk500v2-mega.js`. `ssh` uses Paramiko + log tail.
 5. **UI** — `GET /api/boards` drives the dropdown; no hardcoded pin lists.
 
 Components live in [`shared/components.json`](shared/components.json). Pin-conflict and capability checks are in [`backend/app/validate.py`](backend/app/validate.py).
@@ -115,10 +120,11 @@ config → generate → compile → flash | ssh → monitor
 | Code generation | `backend/app/generator.py` |
 | Compile | `backend/app/compiler.py` (`arduino-cli` or `MOCK_COMPILE=1`) |
 | Pi deploy | `backend/app/pi_deploy.py` (Paramiko) |
-| Arduino flash | browser Web Serial + vendored `frontend/lib/arduino-web-uploader.js` |
-| Monitor | Slide B serial + `KEY=value` chips |
+| Arduino flash | Web Serial STK500v1 (`arduino-web-uploader.js`) or STK500v2 (`stk500v2-mega.js`) |
+| Pi deploy | `backend/app/pi_deploy.py` (Paramiko) + `POST /api/pi/logs` |
+| Monitor | Slide B: USB serial, Pi log tail, or simulated telemetry |
 
-API: `GET /api/health`, `/api/boards`, `/api/components`; `POST /api/generate`, `/api/compile`, `/api/pipeline`, `/api/deploy/pi`.
+API: `GET /api/health`, `/api/boards`, `/api/components`; `POST /api/generate`, `/api/compile`, `/api/pipeline`, `/api/deploy/pi`, `/api/pi/logs`.
 
 ---
 

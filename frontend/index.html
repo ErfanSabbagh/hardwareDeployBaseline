@@ -30,7 +30,7 @@
         <div class="group">
           <label class="check">
             <input type="checkbox" id="simulate-flash" />
-            Simulated flash / skip USB
+            Simulated flash / skip USB (fake telemetry)
           </label>
         </div>
       </div>
@@ -111,6 +111,7 @@
         <div class="group">
           <button type="button" id="btn-connect" class="primary">Connect Board</button>
           <button type="button" id="btn-disconnect" disabled>Disconnect</button>
+          <button type="button" id="btn-pi-logs" hidden>Tail Pi logs</button>
           <span id="connection-status" class="status">Disconnected</span>
         </div>
         <div class="group">
@@ -154,15 +155,15 @@
 
     <footer>
       <p>
-        Arduino flash uses
-        <a href="https://github.com/dbuezas/arduino-web-uploader" target="_blank" rel="noopener">arduino-web-uploader</a>
-        (STK500v1) + Web Serial. Chrome / Edge / Opera on desktop; HTTPS or localhost.
-        Raspberry Pi uses generated Python over SSH (or a downloaded artefact).
+        Arduino Uno/Nano/Pro Mini: STK500v1 Web Serial.
+        Mega 2560: STK500v2 Web Serial.
+        Raspberry Pi: SSH deploy + log tail (not USB serial).
       </p>
     </footer>
   </div>
 
   <script src="lib/arduino-web-uploader.js"></script>
+  <script src="lib/stk500v2-mega.js"></script>
   <script>
     if (document.readyState !== "loading") {
       document.dispatchEvent(new Event("DOMContentLoaded"));

@@ -133,11 +133,11 @@
       "name": "Arduino Mega 2560",
       "family": "arduino",
       "fqbn": "arduino:avr:mega",
-      "flashProfile": null,
+      "flashProfile": "mega",
       "flashProtocol": "stk500v2",
-      "deployKind": "compile_only",
+      "deployKind": "web_serial",
       "defaultBaud": 115200,
-      "notes": "Compilation is supported (FQBN arduino:avr:mega). Browser flash uses STK500v1 only — use simulated flash or avrdude locally. To add in-browser Mega flash, register an STK500v2 strategy.",
+      "notes": "ATmega2560 via STK500v2 at 115200 (not the Uno STK500v1 uploader). Hex without bootloader.",
       "pins": [
         {"id": "2", "label": "D2", "capabilities": ["digital", "pwm"]},
         {"id": "3", "label": "D3", "capabilities": ["digital", "pwm"]},
@@ -168,7 +168,7 @@
       "flashProtocol": null,
       "deployKind": "ssh",
       "defaultBaud": null,
-      "notes": "Generates a gpiozero Python service. Deploy over SSH from the backend, or download the artefact. Web Serial cannot drive Pi GPIO.",
+      "notes": "Generates a gpiozero Python service. Deploy over SSH, then Monitoring tails ~/hw-deploy/hw-deploy.log. Web Serial cannot drive Pi GPIO.",
       "pins": [
         {"id": "2", "label": "BCM2 (SDA)", "capabilities": ["digital", "i2c"]},
         {"id": "3", "label": "BCM3 (SCL)", "capabilities": ["digital", "i2c"]},

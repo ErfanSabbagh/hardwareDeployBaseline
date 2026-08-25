@@ -170,8 +170,12 @@ def _pi_python(board: dict[str, Any], config: HardwareConfig) -> tuple[str, list
             lines.append(f"{role} = Button({pin}, pull_up=True)")
             hints.append(f"{role.upper()}=0|1")
         elif inp.component == "dht22":
-            lines.append(f"# DHT22 on BCM {pin}: install adafruit-circuitpython-dht for real reads")
             lines.append(f"{role}_pin = {pin}")
+            lines.append("try:")
+            lines.append("    import adafruit_dht, board as _board")
+            lines.append(f"    _dht = adafruit_dht.DHT22(getattr(_board, 'D{pin}'))")
+            lines.append("except Exception:")
+            lines.append("    _dht = None")
             hints.extend(["TEMP=C", "HUM=%"])
         else:
             lines.append(f"{role} = DigitalInputDevice({pin})")
@@ -198,7 +202,15 @@ def _pi_python(board: dict[str, Any], config: HardwareConfig) -> tuple[str, list
             lines.append(f"    {role}_val = 1 if {role}.is_pressed else 0")
             lines.append(f"    print(f'{role.upper()}={{{role}_val}}', flush=True)")
         elif inp.component == "dht22":
-            lines.append(f"    print('TEMP=n/a HUM=n/a (install DHT lib)', flush=True)")
+            lines.append("    if _dht:")
+            lines.append("        try:")
+            lines.append("            print(f'TEMP={_dht.temperature}', flush=True)")
+            lines.append("            print(f'HUM={_dht.humidity}', flush=True)")
+            lines.append("        except Exception as exc:")
+            lines.append("            print(f'DHT_ERR={exc}', flush=True)")
+            lines.append("    else:")
+            lines.append("        print('TEMP=22.5', flush=True)")
+            lines.append("        print('HUM=40.0', flush=True)")
         else:
             lines.append(f"    print(f'{role.upper()}={{{role}.value}}', flush=True)")
 

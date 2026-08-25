@@ -77,3 +77,19 @@ class PiDeployResponse(BaseModel):
     logs: str = ""
     remotePath: str = ""
     downloadHint: str = ""
+    logPath: str = ""
+
+
+class PiLogsRequest(BaseModel):
+    host: Optional[str] = None
+    user: Optional[str] = None
+    password: Optional[str] = None
+    logPath: str = "/home/{user}/hw-deploy/hw-deploy.log"
+    sinceBytes: int = 0
+
+
+class PiLogsResponse(BaseModel):
+    ok: bool
+    text: str = ""
+    nextOffset: int = 0
+    logs: str = ""

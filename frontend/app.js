@@ -19,7 +19,13 @@ let hexBlobUrl = null;
 let boards = [];
 let components = [];
 let lastGenerate = null;
+let lastHexText = null;
 let telemetry = {};
+let simTimer = null;
+let piPoll = null;
+let piOffset = 0;
+let piLogPath = "/home/{user}/hw-deploy/hw-deploy.log";
+let lastCompileMock = false;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -159,10 +165,13 @@ function onBoardChange() {
   const board = currentBoard();
   $("#board-notes").textContent = board?.notes || "";
   const flashBtn = $("#btn-flash");
-  if (board?.flashProfile) flashBtn.setAttribute("board", board.flashProfile);
+  if (board?.flashProfile && board?.flashProtocol !== "stk500v2") {
+    flashBtn.setAttribute("board", board.flashProfile);
+  }
   const isPi = board?.family === "raspberry-pi";
   $("#pi-fields").hidden = !isPi;
   $("#btn-deploy-pi").disabled = !isPi;
+  $("#btn-pi-logs").hidden = !isPi;
   if (board?.defaultBaud) $("#baud-select").value = String(board.defaultBaud);
   refreshPinSelects();
 }
@@ -197,7 +206,15 @@ function buildConfig() {
   };
 }
 
+function canFlash(board) {
+  if ($("#simulate-flash").checked) return true;
+  if (!board) return false;
+  if (board.flashProtocol === "stk500v2") return true;
+  return Boolean(board.flashProfile);
+}
+
 function setHexFromText(text) {
+  lastHexText = text;
   if (hexBlobUrl) {
     URL.revokeObjectURL(hexBlobUrl);
     hexBlobUrl = null;
@@ -206,8 +223,7 @@ function setHexFromText(text) {
   hexBlobUrl = URL.createObjectURL(blob);
   const flashBtn = $("#btn-flash");
   flashBtn.setAttribute("hex-href", hexBlobUrl);
-  const board = currentBoard();
-  flashBtn.disabled = !(board?.flashProfile || $("#simulate-flash").checked);
+  flashBtn.disabled = !canFlash(currentBoard());
   $("#flash-progress").textContent = "Hex ready";
 }
 
@@ -241,6 +257,7 @@ async function runPipeline() {
     if (data.compile) {
       logPipe(data.compile.logs || "(no compiler logs)");
       if (data.compile.mock) logPipe("Note: MOCK_COMPILE=1 — hex is not flashable.");
+      lastCompileMock = Boolean(data.compile.mock);
       if (data.compile.ok && data.compile.hex) {
         setHexFromText(data.compile.hex);
         logPipe("Compile OK — hex loaded for Web Serial flash.");
@@ -249,6 +266,7 @@ async function runPipeline() {
         logPipe("Compile failed.");
       }
     } else {
+      lastCompileMock = false;
       logPipe("No compile step (Raspberry Pi artefact is Python).");
       $("#btn-flash").disabled = !$("#simulate-flash").checked;
       $("#btn-deploy-pi").disabled = false;
@@ -267,10 +285,124 @@ $("#btn-clear-pipeline").addEventListener("click", () => {
   $("#pipeline-log-copy").textContent = "";
 });
 
-function goToMonitor(reason) {
+function stopSimTelemetry() {
+  if (simTimer) {
+    clearInterval(simTimer);
+    simTimer = null;
+  }
+}
+
+function stopPiLogs() {
+  if (piPoll) {
+    clearInterval(piPoll);
+    piPoll = null;
+  }
+}
+
+function telemetryKeys() {
+  const hints = lastGenerate?.telemetryHints || [];
+  const keys = hints.map((h) => String(h).split("=")[0]).filter(Boolean);
+  return keys.length ? [...new Set(keys)] : ["STATUS"];
+}
+
+function startSimTelemetry() {
+  stopSimTelemetry();
+  const keys = telemetryKeys();
+  let tick = 0;
+  logSys("[System] Simulation: playing fake telemetry (no USB).");
+  simTimer = setInterval(() => {
+    tick += 1;
+    const lines = keys.map((k) => {
+      if (k.includes("TEMP")) return `${k}=${(21 + (tick % 4)).toFixed(1)}`;
+      if (k.includes("HUM")) return `${k}=${40 + (tick % 5)}`;
+      return `${k}=${tick % 2}`;
+    });
+    appendMonitor(lines.join("\n"), "out");
+  }, 500);
+}
+
+function goToMonitor(reason, opts = {}) {
   logPipe(reason);
   showSlide("dash");
   logSys("[System] " + reason);
+  if (opts.simulate) startSimTelemetry();
+  if (opts.autoConnect) {
+    tryAutoConnect();
+  }
+  if (opts.piLogs) startPiLogs();
+}
+
+async function openSerial(existing) {
+  stopSimTelemetry();
+  const baud = parseInt($("#baud-select").value, 10);
+  port = existing || (await navigator.serial.requestPort());
+  await port.open({ baudRate: baud });
+  setStatus("Connected", "connected");
+  $("#btn-connect").disabled = true;
+  $("#btn-disconnect").disabled = false;
+  $("#serial-input").disabled = false;
+  $("#btn-send").disabled = false;
+  logSys(`[System] Port opened @ ${baud} baud`);
+  startReading();
+}
+
+async function tryAutoConnect() {
+  await new Promise((r) => setTimeout(r, 1600));
+  if (port || !("serial" in navigator)) return;
+  try {
+    const ports = await navigator.serial.getPorts();
+    if (!ports.length) {
+      logSys("[System] Click Connect Board to open serial (no remembered port).");
+      return;
+    }
+    await openSerial(ports[ports.length - 1]);
+    logSys("[System] Reconnected automatically after flash.");
+  } catch (err) {
+    logSys("[System] Auto-reconnect failed — click Connect Board. " + err.message);
+  }
+}
+
+function piCreds() {
+  return {
+    host: $("#pi-host").value || null,
+    user: $("#pi-user").value || null,
+    password: $("#pi-password").value || null,
+    logPath: piLogPath,
+    sinceBytes: piOffset,
+  };
+}
+
+async function fetchPiLogs() {
+  try {
+    const res = await fetch(api("/api/pi/logs"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(piCreds()),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      logSys("[Pi] " + (data.logs || "log fetch failed"));
+      return;
+    }
+    if (data.logs && !data.text) {
+      if (!String(data.logs).startsWith("(no log")) logSys("[Pi] " + data.logs);
+      piOffset = data.nextOffset || 0;
+      return;
+    }
+    if (data.text) appendMonitor(data.text.replace(/\n$/, ""), "out");
+    piOffset = data.nextOffset || 0;
+  } catch (err) {
+    logSys("[Pi] " + err.message);
+  }
+}
+
+function startPiLogs() {
+  stopPiLogs();
+  piOffset = 0;
+  setStatus("Tailing Pi log", "connected");
+  logSys("[System] Tailing SSH log (not USB serial).");
+  fetchPiLogs();
+  piPoll = setInterval(fetchPiLogs, 1000);
 }
 
 const flashBtn = $("#btn-flash");
@@ -281,25 +413,59 @@ flashBtn.addEventListener(
     if ($("#simulate-flash").checked) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      goToMonitor("Simulated flash — skipped Web Serial.");
+      goToMonitor("Simulated deploy — fake telemetry (no hardware).", { simulate: true });
       return;
     }
-    if (!hexBlobUrl) {
+    const board = currentBoard();
+    if (board?.family === "raspberry-pi") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      alert("Use Deploy to Pi (SSH) for Raspberry Pi.");
+      return;
+    }
+    if (!hexBlobUrl && !lastHexText) {
       e.preventDefault();
       e.stopImmediatePropagation();
       alert("Generate & compile (or load a .hex) first.");
       return;
     }
-    const board = currentBoard();
-    if (!board?.flashProfile) {
+    if (lastCompileMock) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      alert("This board has no STK500v1 flash profile. Enable simulated flash or use avrdude.");
+      alert("MOCK_COMPILE hex is not flashable. Run without MOCK_COMPILE=1.");
       return;
     }
     if (port) {
       logPipe("Closing serial monitor so the flasher can take the port…");
       await closePort();
+    }
+
+    if (board?.flashProtocol === "stk500v2") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      logPipe("Mega STK500v2 flash… select the USB port when prompted.");
+      $("#flash-progress").textContent = "0%";
+      try {
+        await window.flashMega2560(lastHexText, {
+          onProgress: (pct) => {
+            $("#flash-progress").textContent = pct + "%";
+          },
+        });
+        $("#flash-progress").textContent = "Done!";
+        goToMonitor("Mega flash finished.", { autoConnect: true });
+      } catch (err) {
+        $("#flash-progress").textContent = "Error!";
+        logPipe(String(err));
+        alert(err.message || err);
+      }
+      return;
+    }
+
+    if (!board?.flashProfile) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      alert("This board has no in-browser flash strategy.");
+      return;
     }
     logPipe("Starting flash… select the same USB port when prompted.");
     const progress = $("#flash-progress");
@@ -308,7 +474,7 @@ flashBtn.addEventListener(
       const t = progress.textContent || "";
       if (t.includes("Done")) {
         clearInterval(timer);
-        goToMonitor("Flash finished. Connect serial to monitor telemetry.");
+        goToMonitor("Flash finished.", { autoConnect: true });
       } else if (t.includes("Error") && Date.now() - start > 500) {
         clearInterval(timer);
         logPipe("Flash error.");
@@ -382,7 +548,10 @@ $("#btn-deploy-pi").addEventListener("click", async () => {
     const data = await res.json();
     logPipe(data.logs || JSON.stringify(data));
     if (data.downloadHint) logPipe(data.downloadHint);
-    if (data.ok) goToMonitor("Pi deploy started. Serial monitor is for Arduino USB; Pi logs are on the device (hw-deploy.log).");
+    if (data.ok) {
+      if (data.logPath) piLogPath = data.logPath;
+      goToMonitor("Pi deploy started — tailing hw-deploy.log.", { piLogs: true });
+    }
   } catch (err) {
     logPipe(String(err));
   }
@@ -398,16 +567,7 @@ $("#btn-connect").addEventListener("click", async () => {
     return;
   }
   try {
-    port = await navigator.serial.requestPort();
-    const baud = parseInt($("#baud-select").value, 10);
-    await port.open({ baudRate: baud });
-    setStatus("Connected", "connected");
-    $("#btn-connect").disabled = true;
-    $("#btn-disconnect").disabled = false;
-    $("#serial-input").disabled = false;
-    $("#btn-send").disabled = false;
-    logSys(`[System] Port opened @ ${baud} baud`);
-    startReading();
+    await openSerial();
   } catch (err) {
     console.error(err);
     setStatus("Error", "error");
@@ -420,6 +580,8 @@ $("#btn-disconnect").addEventListener("click", async () => {
 });
 
 async function closePort() {
+  stopSimTelemetry();
+  stopPiLogs();
   keepReading = false;
   try {
     if (reader) {
@@ -495,6 +657,17 @@ $("#baud-select").addEventListener("change", async () => {
   if (!port) return;
   logSys("[System] Baud rate change requires reconnect. Disconnecting…");
   await closePort();
+});
+
+$("#btn-pi-logs").addEventListener("click", () => startPiLogs());
+
+$("#simulate-flash").addEventListener("change", () => {
+  const board = currentBoard();
+  if (board?.family === "raspberry-pi") {
+    $("#btn-flash").disabled = !$("#simulate-flash").checked;
+  } else if (lastHexText) {
+    $("#btn-flash").disabled = !canFlash(board);
+  }
 });
 
 loadCatalog().catch((err) => {

@@ -13,10 +13,11 @@ from .models import (
     CompileRequest,
     GenerateRequest,
     PiDeployRequest,
+    PiLogsRequest,
     PipelineRequest,
     PipelineResponse,
 )
-from .pi_deploy import deploy_python
+from .pi_deploy import deploy_python, read_logs
 from .registry import get_board, load_boards, load_components
 
 FRONTEND_DIR = Path(os.environ.get("FRONTEND_DIR", Path(__file__).resolve().parents[2] / "frontend"))
@@ -80,6 +81,11 @@ def api_pipeline(req: PipelineRequest):
 @app.post("/api/deploy/pi")
 def api_deploy_pi(req: PiDeployRequest):
     return deploy_python(req.source, req.host, req.user, req.password, req.remotePath)
+
+
+@app.post("/api/pi/logs")
+def api_pi_logs(req: PiLogsRequest):
+    return read_logs(req.host, req.user, req.password, req.logPath, req.sinceBytes)
 
 
 if FRONTEND_DIR.is_dir():

@@ -1,3 +1,5 @@
 # Vendored from https://github.com/dbuezas/arduino-web-uploader
 # Release v1.0.0 main.js (MIT, © David Buezas)
 # Saved as arduino-web-uploader.js for the baseline declarative API.
+#
+# stk500v2-mega.js is an original STK500v2 Web Serial helper for Mega 2560.

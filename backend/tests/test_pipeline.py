@@ -57,6 +57,25 @@ def test_pi_generates_python():
     assert result.deployKind == "ssh"
 
 
+def test_pi_logs_need_host():
+    from app.pi_deploy import read_logs
+
+    result = read_logs(None, None, None, "/tmp/x", 0)
+    assert result.ok is False
+    assert "host" in result.logs.lower() or "user" in result.logs.lower()
+
+
+def test_mega_generates_sketch():
+    cfg = HardwareConfig(
+        boardId="mega",
+        outputs=[PinAssignment(pin="13", component="led", role="status")],
+        intent="blink",
+    )
+    result = generate(cfg)
+    assert result.ok
+    assert result.flashProfile == "mega"
+
+
 def test_mock_compile(monkeypatch):
     monkeypatch.setenv("MOCK_COMPILE", "1")
     compiled = compile_sketch("uno", "void setup(){} void loop(){}")
